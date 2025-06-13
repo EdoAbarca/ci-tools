@@ -1,0 +1,123 @@
+version: '3.8'
+
+services:
+  # Jenkins con herramientas integradas
+  jenkins:
+    image: jenkins/jenkins:lts
+    container_name: jenkins-ci
+    ports:
+      - "8080:8080"
+      - "50000:50000"
+    volumes:
+      - jenkins_data:/var/jenkins_home
+      - /usr/local/maven:/usr/local/maven  # Maven montado desde host
+      - /usr/lib/jvm/java-17-openjdk:/usr/lib/jvm/java-17-openjdk  # JDK montado
+      - /var/run/docker.sock:/var/run/docker.sock  # Para usar Docker desde Jenkins
+      - ./jenkins/plugins.txt:/usr/share/jenkins/ref/plugins.txt  # Plugins iniciales
+    environment:
+      - JAVA_OPTS=-Djenkins.install.runSetupWizard=false
+      - JAVA_HOME=/usr/lib/jvm/java-17-openjdk
+      - PATH=${JAVA_HOME}/bin:/usr/local/maven/bin:${PATH}
+    networks:
+      - tools-network
+    restart: unless-stopped
+
+  # SonarQube con configuración para Java
+  sonarqube:
+    image: sonarqube:community
+    container_name: sonarqube-scanner
+    ports:
+      - "9000:9000"
+    environment:
+      - SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true
+      - SONAR_JAVA_BINARIES=/usr/lib/jvm/java-17-openjdk/bin
+      #- SONAR_FORCEAUTHENTICATION=false  # Solo para desarrollo
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_extensions:/opt/sonarqube/extensions
+      - sonarqube_logs:/opt/sonarqube/logs
+    networks:
+      - tools-network
+    restart: unless-stopped
+    #depends_on:
+    #  - db
+    #healthcheck:
+    #  test: ["CMD", "curl", "-f", "http://localhost:9000/api/system/status"]
+    #  interval: 30s
+    #  timeout: 10s
+    #  retries: 5
+
+  # Base de datos para SonarQube
+  #db:
+  #  image: postgres:13
+  #  container_name: sonarqube-db
+  #  environment:
+  #    - POSTGRES_USER=sonar
+  #    - POSTGRES_PASSWORD=sonar
+  #    - POSTGRES_DB=sonar
+  #  volumes:
+  #    - postgresql:/var/lib/postgresql
+  #    - postgresql_data:/var/lib/postgresql/data
+  #  networks:
+  #    - tools-network
+  #  restart: unless-stopped
+
+  # Trivy para escaneo de vulnerabilidades
+  trivy:
+    image: aquasec/trivy:latest
+    container_name: trivy-scanner
+    ports:
+      - "8081:8080"  # API REST
+    volumes:
+      - trivy_cache:/root/.cache/trivy
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./reports:/reports  # Para guardar reportes
+    environment:
+      - TRIVY_CACHE_DIR=/root/.cache/trivy
+      - TRIVY_NO_PROGRESS=true
+      - TRIVY_QUIET=false
+      - TRIVY_SECURITY_CHECKS=vuln,config,secret
+      - TRIVY_IGNORE_UNFIXED=false
+      - TRIVY_TIMEOUT=10m0s
+    networks:
+      - tools-network
+    restart: unless-stopped
+    #command: >
+    #  sh -c "trivy server --listen 0.0.0.0:8080"
+
+  # OWASP ZAP para seguridad web
+  zap:
+    image: owasp/zap2docker-stable
+    container_name: zap-scanner
+    ports:
+      - "8082:8080"  # Interfaz web
+      - "8090:8090"  # API
+    volumes:
+      - zap_session:/home/zap/.ZAP/
+      - ./zap/policies:/home/zap/.ZAP/policies/
+    environment:
+      - ZAP_AUTH_HEADER=Authorization
+      - ZAP_AUTH_HEADER_VALUE=Bearer your-token
+      - ZAP_PORT=8090
+    networks:
+      - tools-network
+    restart: unless-stopped
+    #command: >
+    #  zap.sh -daemon -host 0.0.0.0 -port 8080
+    #  -config api.disablekey=true
+    #  -config api.addrs.addr.name=.*
+    #  -config api.addrs.addr.regex=true
+
+volumes:
+  jenkins_data:
+  sonarqube_data:
+  sonarqube_extensions:
+  sonarqube_logs:
+  #postgresql:
+  #postgresql_data:
+  trivy_cache:
+  zap_session:
+
+networks:
+  tools-network:
+    driver: bridge

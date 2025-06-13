@@ -87,7 +87,7 @@ services:
 
   # OWASP ZAP para seguridad web
   zap:
-    image: owasp/zap2docker-stable
+    image: zaproxy/zap-stable
     container_name: zap-scanner
     ports:
       - "8082:8080"  # Interfaz web
